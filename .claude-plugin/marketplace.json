@@ -1,0 +1,15 @@
+{
+  "name": "shipshape",
+  "description": "A verification-first workflow for Claude Code: a front door that routes each task to the right workflow, parallel focused code review, and a review-bot PR loop.",
+  "owner": {
+    "name": "codewitty",
+    "url": "https://github.com/codewitty"
+  },
+  "plugins": [
+    {
+      "name": "shipshape",
+      "source": "./plugins/shipshape",
+      "description": "front-door, review-lanes, cleanup-review, review-to-pr, pr-review-loop and init-profile."
+    }
+  ]
+}
