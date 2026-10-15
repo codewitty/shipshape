@@ -1,6 +1,6 @@
 ---
 name: review-to-pr
-description: Take a finished branch all the way to a reviewed pull request in one unattended run. First the internal review (review-lanes: three parallel focused reviewers plus a cleanup reviewer, fixes, a re-check), then the close-out (fresh test counts, fresh proof on the running app, closing log entry, push, PR opened with a body drawn from the log), then the GitHub review loop with the review bot and any human reviewers until they sign off. Use whenever a branch is done and needs hardening before merge, or the user says "review it and open a PR", "harden and open a PR", "get it through review", "ship this branch". Not for reviewing someone else's PR, and not for merging.
+description: Take a finished branch all the way to a reviewed pull request in one unattended run. First the internal review (review-lanes: three parallel focused reviewers plus a cleanup reviewer, fixes, a re-check), then the close-out (fresh test counts, fresh proof on the running app, closing log entry, push, PR opened with a body drawn from the log), then the GitHub review loop with the review bot and any human reviewers until they sign off. Use whenever a branch is done and needs hardening before merge, or the user says "review it and open a PR", "harden and open a PR", "get it through review", "ship this branch". Not for reviewing someone else's PR. It merges only when the workflow profile opts in with `Merge on clean pass: squash`.
 ---
 
 # Review to PR
@@ -67,7 +67,8 @@ defines it) skips steps 1 and 2 and says so in the closing entry and the PR body
    verified), and a **Not done, deliberately** section carrying the pending production and
    money items. Follow any PR conventions in the profile.
 
-   Opening a PR is not merging. Don't merge, and don't run destructive remediation
+   Opening a PR is not merging. Don't merge here (the only automatic merge is the
+   profile opt-in at the end of Phase 3), and don't run destructive remediation
    scripts: those need their own instruction. A reviewer approving code is not approving
    a production data fix, so name any pending production action in the PR body and in
    your message.
@@ -117,7 +118,9 @@ matter when the two reviews are chained:
 The loop ends on the states `shipshape:pr-review-loop` lists: a clean bot pass on the current
 head with nothing actionable, a human approval, a stop word, merge, or close. Report the
 round count, what changed, and every thread left open as a pushback. Don't merge; that
-needs its own instruction.
+needs its own instruction, unless the profile's GitHub section opts in with
+`Merge on clean pass: squash`. Then merge as `shipshape:pr-review-loop` describes under
+"Merging on a clean pass", and report the merge commit with the pending production items.
 
 ## Running two branches at once
 

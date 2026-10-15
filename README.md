@@ -18,7 +18,7 @@ It does three things:
   thread, pushes back with evidence where the reviewer is wrong, and waits for the next
   pass until the reviewer signs off.
 
-Nothing in it merges or releases. Those stay with you.
+Nothing in it releases, and nothing merges unless your workflow profile opts in (`Merge on clean pass: squash`): then a clean review-bot pass on the current head squash-merges the PR and deletes the remote branch.
 
 ## Install
 

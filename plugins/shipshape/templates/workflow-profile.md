@@ -101,3 +101,8 @@ on a human's sign-off.
 
 Review logs (`review_pass_*.md`) are committed on the branch, so they reach the default
 branch on merge. Say here if you'd rather keep them out, and add them to `.gitignore`.
+
+The PR loop never merges unless this section says `Merge on clean pass: squash`. With
+it, a clean review-bot pass (or a human approval) on the current head squash-merges the
+PR and deletes the remote branch. Leave it out if a human merges, or if merging to the
+default branch deploys somewhere you want to gate by hand.
