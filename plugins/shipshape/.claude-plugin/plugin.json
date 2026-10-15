@@ -1,7 +1,7 @@
 {
   "name": "shipshape",
   "description": "Route each task to the right workflow, prove changes on the running app, review them with parallel focused reviewers, and work the PR's review threads to sign-off.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "codewitty",
     "url": "https://github.com/codewitty"

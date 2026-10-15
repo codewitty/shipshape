@@ -419,6 +419,31 @@ break the tie and they are reading the PR.
 When the loop does end, report the round count, what you changed, and every
 thread still open because you pushed back on it.
 
+### Merging on a clean pass (opt-in)
+
+By default the loop never merges: merging needs its own instruction. A repo can opt in
+by saying `Merge on clean pass: squash` in its workflow profile's GitHub section (or
+the user can say so in the conversation). Then, and only when the loop ends on
+`signoff_source: "bot_clean"` or `approved`:
+
+1. Re-read `$S status`. Merge only if the head is still the commit the bot or the
+   approver read (`bot_clean_head` true for a bot pass), nothing is actionable, and no
+   stop word is on the PR. A sign-off phrase in a comment is not enough; a stale head
+   means the verdict covers code that has since changed.
+2. Merge that exact commit and delete the remote branch:
+
+   ```bash
+   gh pr merge <n> --repo <owner/name> --squash --delete-branch --match-head-commit <head_sha>
+   ```
+
+   `--match-head-commit` makes GitHub refuse the merge if anything was pushed after
+   the reviewed head, so a late push can't ride in unreviewed.
+3. If GitHub refuses (conflicts, failing required checks, branch protection), post one
+   PR comment saying why and stop. Don't resolve conflicts or bypass checks to get the
+   merge through; that is a new round of work, not a merge.
+4. Report the merge commit. A local branch or worktree for the PR can then be removed;
+   a deploy or release is still its own instruction.
+
 ## Settings
 
 Change these with the environment variables below, not by editing this file or the
@@ -442,6 +467,7 @@ the conversation override them.
 | Review trigger | `@codex review`, posted once per head at the end of every round | `PRLOOP_REVIEW_TRIGGER` |
 | Review bot | `chatgpt-codex-connector`, the login whose "Reviewed commit" line marks a head as reviewed | `PRLOOP_REVIEW_BOT`, `PRLOOP_REVIEWED_RE` |
 | Bot clean pass is sign-off | Yes, when "Didn't find any major issues" names the current head and nothing is actionable | `PRLOOP_BOT_SIGNOFF=0`, `PRLOOP_BOT_CLEAN_RE` |
+| Merge on clean pass | Off: the loop never merges | The profile's GitHub section says `Merge on clean pass: squash` (see "Merging on a clean pass") |
 | Commits per round | One | The repo squashes on merge and prefers granular commits. |
 | Backoff | 2 to 30 min | `PRLOOP_DELAYS` |
 | Wait deadline | None | Only when you deliberately want the loop to expire. |
