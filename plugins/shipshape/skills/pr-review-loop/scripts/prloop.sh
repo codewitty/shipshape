@@ -23,7 +23,8 @@
 #   PRLOOP_REVIEW_TRIGGER  comment that summons the review bot (default "@codex review");
 #                          "none" means the repo has no review bot and request-review does nothing
 #   PRLOOP_REVIEW_BOT      login of the bot that answers it (default chatgpt-codex-connector)
-#   PRLOOP_REVIEWED_RE     regex for the bot's "I read commit X" line (default "Reviewed commit")
+#   PRLOOP_REVIEWED_RE     regex for the bot's "I finished a review" comment (default matches
+#                          "Reviewed commit" and Codex's codex-review-receipt marker)
 #   PRLOOP_BOT_CLEAN_RE    regex for the bot's clean verdict (default "Didn't find any major issues")
 #   PRLOOP_BOT_SIGNOFF     0 to stop a clean bot pass on the head from counting as sign-off (default 1)
 set -euo pipefail
@@ -90,15 +91,19 @@ QUERY_MARKER_PREFIX="${PRLOOP_QUERY_MARKER:-<!-- prloop:signoff-query head=}"
 # round ends by posting the trigger, stamped with the head it was asked for, so
 # the bot re-reads the code it is about to be asked about and the loop never
 # waits on a review that was never requested. Codex answers a clean pass with a
-# PR comment naming the commit ("Reviewed commit: `<sha>`") and no threads, so
-# `status` reports bot_reviewed_head from that and `wait` wakes on it.
+# PR comment and no threads, so `status` reports bot_reviewed_head from that and
+# `wait` wakes on it. Older receipts named the commit ("Reviewed commit: `<sha>`");
+# current ones carry only a `codex-review-receipt` marker and no SHA, so a receipt
+# also counts for the head when it was posted after the latest review request,
+# and that request was for this head.
 REVIEW_TRIGGER="${PRLOOP_REVIEW_TRIGGER:-@codex review}"
 REVIEW_BOT="${PRLOOP_REVIEW_BOT:-chatgpt-codex-connector}"
 REVIEW_MARKER_PREFIX="${PRLOOP_REVIEW_MARKER:-<!-- prloop:review-request head=}"
-# How the bot says which commit it finished reading. Codex: "Reviewed commit: `sha`".
-REVIEWED_RE="${PRLOOP_REVIEWED_RE:-Reviewed commit}"
+# How the bot says it finished a review. Codex: "Reviewed commit: `sha`" in older
+# receipts, the `<!-- codex-review-receipt:v1 -->` marker in current ones.
+REVIEWED_RE="${PRLOOP_REVIEWED_RE:-Reviewed commit|codex-review-receipt}"
 # How the bot says the pass found nothing. Codex posts a PR comment:
-#   "Codex Review: Didn't find any major issues. ... Reviewed commit: `sha`"
+#   "Codex Review: Didn't find any major issues. Already looking forward to the next diff."
 # On a solo PR that is the only sign-off the loop can get, since GitHub will not
 # let the author approve their own PR, so it counts as one unless disabled.
 BOT_CLEAN_RE="${PRLOOP_BOT_CLEAN_RE:-Didn.t find any (major )?issues}"
@@ -139,7 +144,7 @@ query($owner:String!, $name:String!, $pr:Int!) {
       author { login }
       closingIssuesReferences(first:10) { nodes { number title url body } }
       comments(last:40) { nodes { author { login } body createdAt url } }
-      reviews(last:30) { nodes { author { login } state body submittedAt url } }
+      reviews(last:30) { nodes { author { login } state body submittedAt url commit { oid } } }
       reviewThreads(first:100) {
         nodes {
           id isResolved isOutdated path line startLine originalLine originalStartLine diffSide
@@ -245,11 +250,21 @@ status)
         })
       | map(. + { on_head: on_head($head) })
       | map(. + { counts: (.ph or (.mk and (.on_head != false))) })  as $human_said
-    | [ ($pr.comments.nodes[] | {a: (.author.login // ""), b: .body}),
-        ($pr.reviews.nodes[]  | {a: (.author.login // ""), b: (.body // "")}) ]
-      | map(select(.a == $rbot or (.a | startswith($rbot)))) as $bot_said
-    | ($bot_said | map(select(.b | test($clean_re; "i")))
-                 | map(select(.b | contains($head[0:7]))) | length > 0) as $bot_clean
+    # The latest review request of any head. A bot comment that names no commit
+    # is credited to the head only when it came after this request and the
+    # request was for this head, so a receipt for an older push never counts.
+    | ([ $pr.comments.nodes[] | select(.body | contains($rmark))
+         | {t: .createdAt, mine: (.body | contains($rmark + $head))} ]
+       | sort_by(.t) | last) as $last_req
+    | [ ($pr.comments.nodes[] | {a: (.author.login // ""), b: .body, t: .createdAt, c: null}),
+        ($pr.reviews.nodes[]  | {a: (.author.login // ""), b: (.body // ""),
+                                 t: .submittedAt, c: (.commit.oid // null)}) ]
+      | map(select(.a == $rbot or (.a | startswith($rbot))))
+      | map(. + { on_head: ((.b | contains($head[0:7]))
+                            or (.c != null and .c == $head)
+                            or (.c == null and $last_req != null and $last_req.mine
+                                and (.t // "") > $last_req.t)) }) as $bot_said
+    | ($bot_said | map(select(.on_head and (.b | test($clean_re; "i")))) | length > 0) as $bot_clean
     | ([$pr.reviewThreads.nodes[] | select(.actionable)] | length == 0) as $nothing_actionable
     | {
         repo: "'"$REPO"'", pr: $pr.number, title: $pr.title, url: $pr.url,
@@ -285,16 +300,17 @@ status)
             | select(.body | contains($qmark + $head)) ] | length > 0),
         review_requested_for_head: ([ $pr.comments.nodes[]
             | select(.body | contains($rmark + $head)) ] | length > 0),
-        # The review bot names the commit it read ("Reviewed commit: `617f14db68`"),
-        # in a PR comment on a clean pass and in the review body otherwise. The
-        # phrase is required, not just the SHA: the bot also keeps a status table
-        # that names the head while a review is still running.
-        bot_reviewed_head: ($bot_said | map(select(.b | test($reviewed_re; "i")))
-            | map(select(.b | contains($head[0:7]))) | length > 0),
+        # A finished review on this head: a PR review on the head commit, or a
+        # comment matching reviewed_re tied to the head as described at
+        # $bot_said. A comment needs the phrase, not just the SHA or timing: the
+        # bot also keeps a status table comment that names the head while a
+        # review is still running.
+        bot_reviewed_head: ($bot_said
+            | map(select(.on_head and (.c == $head or (.b | test($reviewed_re; "i")))))
+            | length > 0),
         # The clean verdict of the bot on this head. Counted as sign-off below
         # when nothing is actionable, unless PRLOOP_BOT_SIGNOFF=0.
-        bot_clean_head: ($bot_said | map(select(.b | test($clean_re; "i")))
-            | map(select(.b | contains($head[0:7]))) | length > 0),
+        bot_clean_head: $bot_clean,
         signed_off: (([$human_said[] | select(.counts)] | length > 0)
                      or ($bot_signoff and $bot_clean and $nothing_actionable)),
         signoff_source: ([$human_said[] | select(.counts)
